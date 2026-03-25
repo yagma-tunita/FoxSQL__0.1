@@ -1,7 +1,7 @@
 #pragma once
 #include "AST.h"
 #include "Catalog.h"
-#include "StorageManager.h"
+#include "Database.h"
 #include "Table.h"
 #include "ResultSet.h"
 #include "Expression.h"
@@ -11,7 +11,7 @@ namespace FoxSQL {
 
     class Executor {
     public:
-        Executor(StorageManager& storage) : storage_(storage) {}
+        Executor(Database& db) : db_(db) {}
 
         ResultSet execute(const ASTNode* stmt) {
             if (auto create = dynamic_cast<const CreateTableStmt*>(stmt)) {
@@ -33,17 +33,18 @@ namespace FoxSQL {
         }
 
     private:
-        StorageManager& storage_;
+        Database& db_;
 
         ResultSet executeCreateTable(const CreateTableStmt* stmt) {
             Catalog::instance().createTable(stmt->tableName, stmt->columns);
-            Table table(stmt->tableName, stmt->columns, storage_);
+            // 创建表后立即从缓存获取（或新建）
+            db_.getTable(stmt->tableName);
             return ResultSet();
         }
 
         ResultSet executeInsert(const InsertStmt* stmt) {
-            auto columns = Catalog::instance().getTableColumns(stmt->tableName);
-            Table table(stmt->tableName, columns, storage_);
+            Table* table = db_.getTable(stmt->tableName);
+            const auto& columns = table->getColumns();
 
             Row row;
             if (stmt->values.empty() || stmt->values[0].first.empty()) {
@@ -55,22 +56,21 @@ namespace FoxSQL {
             }
             else {
                 for (const auto& pair : stmt->values) {
-                    const std::string& colName = pair.first;
-                    const Value& val = pair.second;
-                    row.setValue(colName, val);
+                    row.setValue(pair.first, pair.second);
                 }
             }
-            table.insertRow(row);
+            table->insertRow(row);
             return ResultSet();
         }
 
         ResultSet executeSelect(const SelectStmt* stmt) {
-            auto columns = Catalog::instance().getTableColumns(stmt->tableName);
-            Table table(stmt->tableName, columns, storage_);
+            Table* table = db_.getTable(stmt->tableName);
+            const auto& columns = table->getColumns();
             ResultSet result;
-            for (size_t rid : table.getAllRids()) {
+
+            for (int64_t key : table->getAllKeys()) {
                 try {
-                    Row row = readRecordByRID(stmt->tableName, rid, columns);
+                    Row row = table->getRowByPrimaryKey(key);
                     const Expression* whereExpr = dynamic_cast<const Expression*>(stmt->where.get());
                     if (evaluateWhere(whereExpr, row, columns)) {
                         Row projected = projectColumns(row, stmt->columns, columns);
@@ -83,15 +83,15 @@ namespace FoxSQL {
         }
 
         ResultSet executeDelete(const DeleteStmt* stmt) {
-            auto columns = Catalog::instance().getTableColumns(stmt->tableName);
-            Table table(stmt->tableName, columns, storage_);
-            for (size_t rid : table.getAllRids()) {
+            Table* table = db_.getTable(stmt->tableName);
+            const auto& columns = table->getColumns();
+
+            for (int64_t key : table->getAllKeys()) {
                 try {
-                    Row row = readRecordByRID(stmt->tableName, rid, columns);
+                    Row row = table->getRowByPrimaryKey(key);
                     const Expression* whereExpr = dynamic_cast<const Expression*>(stmt->where.get());
                     if (evaluateWhere(whereExpr, row, columns)) {
-                        int64_t key = getPrimaryKeyValue(row, columns);
-                        table.deleteRowByPrimaryKey(key);
+                        table->deleteRowByPrimaryKey(key);
                     }
                 }
                 catch (const SQLException&) {}
@@ -99,37 +99,24 @@ namespace FoxSQL {
             return ResultSet();
         }
 
-        ResultSet executeUpdate(const UpdateStmt* stmt) 
-        {
-            auto columns = Catalog::instance().getTableColumns(stmt->tableName);
-            Table table(stmt->tableName, columns, storage_);
-            for (size_t rid : table.getAllRids()) 
-            {
-                try 
-                {
-                    Row row = readRecordByRID(stmt->tableName, rid, columns);
+        ResultSet executeUpdate(const UpdateStmt* stmt) {
+            Table* table = db_.getTable(stmt->tableName);
+            const auto& columns = table->getColumns();
+
+            for (int64_t key : table->getAllKeys()) {
+                try {
+                    Row row = table->getRowByPrimaryKey(key);
                     const Expression* whereExpr = dynamic_cast<const Expression*>(stmt->where.get());
-                    if (evaluateWhere(whereExpr, row, columns))
-                    {
-                        for (const auto& pair : stmt->setClause) 
-                        {
-                            const std::string& colName = pair.first;
-                            const Value& val = pair.second;
-                            row.setValue(colName, val);
+                    if (evaluateWhere(whereExpr, row, columns)) {
+                        for (const auto& pair : stmt->setClause) {
+                            row.setValue(pair.first, pair.second);
                         }
-                        int64_t key = getPrimaryKeyValue(row, columns);
-                        table.updateRowByPrimaryKey(key, row);
+                        table->updateRowByPrimaryKey(key, row);
                     }
                 }
                 catch (const SQLException&) {}
             }
             return ResultSet();
-        }
-
-        Row readRecordByRID(const std::string& tableName, size_t rid,
-            const std::vector<ColumnMeta>& columns) const {
-            auto data = storage_.readRecord(tableName, rid);
-            return RecordFormat::deserialize(data.data(), columns);
         }
 
         bool evaluateWhere(const Expression* expr, const Row& row,
@@ -152,15 +139,5 @@ namespace FoxSQL {
             }
             return result;
         }
-
-        int64_t getPrimaryKeyValue(const Row& row, const std::vector<ColumnMeta>& columns) const {
-            for (const auto& col : columns) {
-                if (col.is_primary) {
-                    return row.getValue(col.name).getInt();
-                }
-            }
-            throw SQLException("No primary key");
-        }
     };
-
 }

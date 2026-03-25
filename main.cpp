@@ -1,5 +1,6 @@
 #include "Database.h"
 #include "help.h"
+#include "Color.h"      // 新增颜色头文件
 #include <iostream>
 #include <string>
 #include <algorithm>
@@ -7,71 +8,14 @@
 #include <vector>
 #include <windows.h>
 
+// 原有的 SetColor/ResetColor 可以保留，但为了统一，我们也可以直接使用 Color 命名空间中的函数
+// 这里为了不破坏原有逻辑，我们保留原有的 SetColor/ResetColor 函数，但让它们调用 Color 命名空间的实现
 void SetColor(int color) {
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetConsoleTextAttribute(hConsole, color);
+    FoxSQL::Color::set(color);
 }
 
 void ResetColor() {
-    SetColor(7);
-}
-
-void HighlightPrint(const std::string& text) {
-    const std::vector<std::string> keywords = {
-        "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES",
-        "UPDATE", "SET", "DELETE", "CREATE", "TABLE", "INT",
-        "VARCHAR", "PRIMARY", "KEY", "AND", "OR", "NOT"
-    };
-
-    size_t pos = 0;
-    while (pos < text.size()) {
-        while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) {
-            std::cout << text[pos];
-            ++pos;
-        }
-        if (pos >= text.size()) break;
-
-        if (std::isalpha(static_cast<unsigned char>(text[pos])) || text[pos] == '_') {
-            size_t start = pos;
-            while (pos < text.size() && (std::isalnum(static_cast<unsigned char>(text[pos])) || text[pos] == '_')) ++pos;
-            std::string word = text.substr(start, pos - start);
-            std::string upperWord = word;
-            std::transform(upperWord.begin(), upperWord.end(), upperWord.begin(), ::toupper);
-
-            if (std::find(keywords.begin(), keywords.end(), upperWord) != keywords.end()) {
-                SetColor(9);
-                std::cout << word;
-                ResetColor();
-            }
-            else {
-                std::cout << word;
-            }
-        }
-        else if (text[pos] == '\'') {
-            size_t start = pos;
-            ++pos;
-            while (pos < text.size() && text[pos] != '\'') ++pos;
-            ++pos;
-            std::string str = text.substr(start, pos - start);
-            SetColor(12);
-            std::cout << str;
-            ResetColor();
-        }
-        else if (std::isdigit(static_cast<unsigned char>(text[pos])) ||
-            (text[pos] == '-' && pos + 1 < text.size() && std::isdigit(static_cast<unsigned char>(text[pos + 1])))) {
-            size_t start = pos;
-            if (text[pos] == '-') ++pos;
-            while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) ++pos;
-            std::string num = text.substr(start, pos - start);
-            SetColor(10);
-            std::cout << num;
-            ResetColor();
-        }
-        else {
-            std::cout << text[pos];
-            ++pos;
-        }
-    }
+    FoxSQL::Color::reset();
 }
 
 static std::string trim(const std::string& s) {
@@ -92,13 +36,16 @@ int main() {
 
     FoxSQL::Database db;
 
-    SetColor(11);
+    // 使用蓝色显示欢迎信息
+    SetColor(FoxSQL::Color::KEYWORD);
     std::cout << "\n========================================\n";
     std::cout << "    Welcome to FoxSQL 0.1\n";
     std::cout << "    Lightweight SQL Database Engine\n";
     std::cout << "========================================\n";
     ResetColor();
-    std::cout << "Type 'help' for commands, 'quit' to exit.\n";
+    std::cout << "Type 'help' for commands.\n";
+    std::cout << "  'quit' : discard all changes and exit\n";
+    std::cout << "  'exit' : save all changes and exit\n";
     std::cout << "SQL statements can be terminated with a semicolon (optional).\n\n";
 
     std::string line;
@@ -109,8 +56,13 @@ int main() {
         if (line.empty()) continue;
 
         std::string cmd = toLower(line);
-        if (cmd == "quit" || cmd == "exit") {
-            std::cout << "Goodbye!\n";
+        if (cmd == "quit") {
+            std::cout << "Exiting without saving changes...\n";
+            break;
+        }
+        else if (cmd == "exit") {
+            std::cout << "Saving changes and exiting...\n";
+            db.save();
             break;
         }
         else if (cmd == "help") {
@@ -121,13 +73,26 @@ int main() {
         try {
             auto result = db.executeSQL(line);
             if (!result.empty()) {
+                // 使用颜色显示表头
+                SetColor(FoxSQL::Color::KEYWORD);
                 std::cout << "id\tname\n";
+                SetColor(FoxSQL::Color::DEFAULT);
                 std::cout << "---\t----\n";
+
                 for (const auto& row : result) {
                     try {
                         int64_t id = row.getValue("id").getInt();
                         std::string name = row.getValue("name").getString();
-                        std::cout << id << "\t" << name << std::endl;
+                        // id 显示为绿色
+                        SetColor(FoxSQL::Color::NUMBER);
+                        std::cout << id;
+                        ResetColor();
+                        std::cout << "\t";
+                        // name 显示为青色
+                        SetColor(FoxSQL::Color::CYE);
+                        std::cout << name;
+                        ResetColor();
+                        std::cout << std::endl;
                     }
                     catch (...) {}
                 }
@@ -137,12 +102,11 @@ int main() {
             }
         }
         catch (const std::exception& e) {
-            SetColor(12);
+            SetColor(FoxSQL::Color::STRING);   // 错误信息红色
             std::cerr << "Error: " << e.what() << std::endl;
             ResetColor();
         }
     }
 
-    db.shutdown();
     return 0;
 }

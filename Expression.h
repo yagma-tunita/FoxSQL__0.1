@@ -3,7 +3,8 @@
 #include "Row.h"
 #include "common.h"
 
-namespace FoxSQL {
+namespace FoxSQL 
+{
 
     class ExpressionEvaluator 
     {

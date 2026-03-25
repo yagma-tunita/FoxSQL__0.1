@@ -2,8 +2,13 @@
 #include <string>
 #include <windows.h>
 
-namespace FoxSQL {
-    namespace fs {
+namespace FoxSQL 
+{
+    namespace fs 
+    {
+        inline bool rename(const std::string& oldPath, const std::string& newPath) {
+            return MoveFileA(oldPath.c_str(), newPath.c_str()) != 0;
+        }
 
         inline bool createDirectory(const std::string& path) {
             return CreateDirectoryA(path.c_str(), NULL) != 0;
@@ -37,10 +42,11 @@ namespace FoxSQL {
         }
 
         inline std::string getDataDir() {
-            return "C:\\FoxOS\\Data\\";
+            return "C:\\FoxSQLs\\Data\\";
         }
 
-        inline void initDataDir() {
+        inline void initDataDir() 
+        {
             std::string dataDir = getDataDir();
             createDirectories(dataDir);
         }

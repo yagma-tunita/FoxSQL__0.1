@@ -24,9 +24,11 @@ namespace FoxSQL {
             file.flush();
         }
 
-        void createTableFile(const std::string& tableName) {
+        void createTableFile(const std::string& tableName, bool truncate = false) {
             std::string path = fs::getDataDir() + tableName + ".ft";
-            if (fs::fileExists(path)) return;
+            if (truncate && fs::fileExists(path)) {
+                fs::removeFile(path);
+            }
             std::ofstream file(path, std::ios::binary);
             if (!file) throw SQLException("Failed to create table file");
             writeFileHeader(file);
@@ -89,5 +91,4 @@ namespace FoxSQL {
             file.write(reinterpret_cast<const char*>(&pageSize), sizeof(pageSize));
         }
     };
-
 }

@@ -22,8 +22,8 @@ namespace FoxSQL {
             std::cout << "Logical operators: AND, OR\n\n";
             std::cout << "Special commands:\n";
             std::cout << "  help     - show this help\n";
-            std::cout << "  quit     - exit the program\n";
-            std::cout << "  exit     - exit the program\n";
+            std::cout << "  quit     - discard all changes and exit\n";
+            std::cout << "  exit     - save all changes and exit\n";
             std::cout << "========================\n";
         }
     };

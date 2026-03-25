@@ -19,21 +19,27 @@ namespace FoxSQL
             : name_(name), columns_(columns), storage_(storage) {
             validatePrimaryKey();
             loadFromDisk();               // 从磁盘加载所有行到内存
+            // 重建索引（基于内存数据）
             index_manager_.createIndex<int64_t, size_t>("primary");
             rebuildIndex();
         }
 
-        size_t insertRow(const Row& row) {
+        // 插入行（仅修改内存）
+        size_t insertRow(const Row& row)
+        {
             int64_t key = getPrimaryKeyValue(row);
             std::lock_guard<std::mutex> lock(mutex_);
+
             if (rows_.find(key) != rows_.end())
                 throw SQLException("Duplicate primary key");
+
             size_t rid = next_rid_++;
             rows_[key] = row;
             index_manager_.insert("primary", key, rid);
             return rid;
         }
 
+        // 通过主键获取行（从内存）
         Row getRowByPrimaryKey(int64_t key) const {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = rows_.find(key);
@@ -42,6 +48,7 @@ namespace FoxSQL
             return it->second;
         }
 
+        // 删除行（仅修改内存）
         void deleteRowByPrimaryKey(int64_t key) {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = rows_.find(key);
@@ -51,6 +58,7 @@ namespace FoxSQL
             index_manager_.remove<int64_t, size_t>("primary", key);
         }
 
+        // 更新行（仅修改内存）
         void updateRowByPrimaryKey(int64_t key, const Row& newRow) {
             std::lock_guard<std::mutex> lock(mutex_);
             auto it = rows_.find(key);
@@ -59,6 +67,7 @@ namespace FoxSQL
             it->second = newRow;
         }
 
+        // 获取所有主键（用于全表扫描，模拟 RID 列表）
         std::vector<int64_t> getAllKeys() const {
             std::lock_guard<std::mutex> lock(mutex_);
             std::vector<int64_t> keys;
@@ -71,11 +80,11 @@ namespace FoxSQL
         const std::vector<ColumnMeta>& getColumns() const { return columns_; }
         const std::string& getName() const { return name_; }
 
-        // 将所有内存数据写回磁盘（exit 时调用）
+        // 保存所有内存数据到磁盘（由 Database 在 exit 时调用）
         void persistToDisk() {
             std::lock_guard<std::mutex> lock(mutex_);
-            // 清空文件并重写
-            storage_.createTableFile(name_, true);
+            // 先清空文件（重建）
+            storage_.createTableFile(name_, true);   // truncate = true
             size_t rid = 1;
             for (const auto& p : rows_) {
                 const Row& row = p.second;
@@ -115,12 +124,12 @@ namespace FoxSQL
         void loadFromDisk() {
             std::string path = fs::getDataDir() + name_ + ".ft";
             std::ifstream file(path, std::ios::binary);
-            if (!file) return;
+            if (!file) return;   // 新表，无数据
 
             file.seekg(0, std::ios::end);
             size_t fileSize = file.tellg();
             file.seekg(0, std::ios::beg);
-            file.seekg(12);   // 跳过文件头
+            file.seekg(12);       // 跳过文件头 (magic+version+pageSize)
 
             size_t pageId = 1;
             size_t offset = PAGE_SIZE;
